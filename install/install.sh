@@ -7,6 +7,7 @@
 #   chmod +x install.sh
 #   ./install.sh              # Full installation (may be slow)
 #   ./install.sh --minimal    # Minimal installation (faster, recommended)
+#   ./install.sh --vast       # Vast.ai PyTorch template mode
 #   ./install.sh --docker     # Docker mode (quiet + non-interactive)
 #
 # This script creates a conda environment and installs pip packages using uv.
@@ -44,6 +45,7 @@ export ENV_NAME=metanano
 # =============================================================================
 QUIET_MODE=false
 YES_MODE=false
+USE_VAST=false
 
 # Logging functions / 日志函数
 log_info() {
@@ -98,6 +100,13 @@ for arg in "$@"; do
             USE_MINIMAL=true
             shift
             ;;
+        --vast|-v)
+            # Vast.ai PyTorch template mode: reuse /venv/main and install a light stack
+            # Vast.ai PyTorch 模式：复用 /venv/main 并安装轻量依赖栈
+            USE_VAST=true
+            USE_MINIMAL=true
+            shift
+            ;;
         --retries=*)
             MAX_RETRIES="${arg#*=}"
             shift
@@ -115,6 +124,8 @@ for arg in "$@"; do
             echo "                    非交互模式（自动确认所有提示）"
             echo "  --docker, -d      Docker mode (combines --quiet --yes --minimal)"
             echo "                    Docker 模式（组合 --quiet --yes --minimal）"
+            echo "  --vast, -v        Vast.ai PyTorch template mode"
+            echo "                    Vast.ai PyTorch 模板模式"
             echo "  --retries=N       Number of retry attempts (default: 3)"
             echo "                    重试次数（默认：3）"
             echo "  --help, -h        Show this help message"
@@ -124,101 +135,121 @@ for arg in "$@"; do
     esac
 done
 
-# Select environment file / 选择环境文件
-if [ "$USE_MINIMAL" = true ]; then
-    ENV_FILE="$SCRIPT_DIR/environment-minimal.yml"
-    log_info "Using minimal environment (recommended)"
-    log_info "使用最小环境（推荐）"
-else
-    ENV_FILE="$SCRIPT_DIR/environment.yml"
-    log_info "Using full environment (may be slow due to many packages)"
-    log_info "使用完整环境（由于包较多可能较慢）"
-fi
-
-# Get conda base path / 获取 conda 基础路径
-CONDA_BASE_PREFIX=$(conda info --base 2>/dev/null)
-
-log_header "NOVA Nanobody Filter - Environment Setup / 纳米抗体过滤器 - 环境设置"
-
-# Configure conda for better network reliability
-# 配置 conda 以提高网络可靠性
-log_info "Configuring conda for better network reliability..."
-log_info "配置 conda 以提高网络可靠性..."
-conda config --set remote_read_timeout_secs 600 2>/dev/null || true
-conda config --set remote_connect_timeout_secs 30 2>/dev/null || true
-conda config --set fetch_threads 2 2>/dev/null || true
-
-# Detect package manager: prefer mamba > micromamba > conda with libmamba > conda
-# 检测包管理器：优先使用 mamba > micromamba > 带 libmamba 的 conda > conda
-detect_package_manager() {
-    if command -v mamba &> /dev/null; then
-        echo "mamba"
-    elif command -v micromamba &> /dev/null; then
-        echo "micromamba"
-    else
-        # Check if libmamba solver is available
-        # 检查 libmamba 求解器是否可用
-        if conda config --show solver 2>/dev/null | grep -q "libmamba"; then
-            echo "conda-libmamba"
-        elif conda list -n base 2>/dev/null | grep -q "conda-libmamba-solver"; then
-            echo "conda-libmamba"
-        else
-            echo "conda"
-        fi
+if [ "$USE_VAST" = true ]; then
+    log_header "NOVA Nanobody Filter - Vast.ai template setup / NOVA 纳米抗体过滤器 - Vast.ai 模板设置"
+    VAST_ACTIVATE="/venv/main/bin/activate"
+    if [ ! -f "$VAST_ACTIVATE" ]; then
+        log_error "Vast.ai template environment not found: $VAST_ACTIVATE"
+        log_error "未找到 Vast.ai 模板环境: $VAST_ACTIVATE"
+        exit 1
     fi
-}
 
-PKG_MANAGER=$(detect_package_manager)
+    # Reuse the template's pre-configured main environment.
+    # 复用模板自带的 main 环境。
+    source "$VAST_ACTIVATE"
+    CONDA_BASE_PREFIX=$(conda info --base 2>/dev/null || true)
+    ENV_PREFIX="${CONDA_PREFIX:-${VIRTUAL_ENV:-/venv/main}}"
 
-log_info ""
-log_info "Using package manager: $PKG_MANAGER"
-log_info "使用包管理器: $PKG_MANAGER"
+    log_info "Using Vast.ai template environment: $ENV_PREFIX"
+    log_info "使用 Vast.ai 模板环境: $ENV_PREFIX"
+    PIP_REQUIREMENTS="$SCRIPT_DIR/requirements-minimal.txt"
+else
+    # Select environment file / 选择环境文件
+    if [ "$USE_MINIMAL" = true ]; then
+        ENV_FILE="$SCRIPT_DIR/environment-minimal.yml"
+        log_info "Using minimal environment (recommended)"
+        log_info "使用最小环境（推荐）"
+    else
+        ENV_FILE="$SCRIPT_DIR/environment.yml"
+        log_info "Using full environment (may be slow due to many packages)"
+        log_info "使用完整环境（由于包较多可能较慢）"
+    fi
 
-# Set up the create/update commands based on package manager
-# 根据包管理器设置创建/更新命令
-# Add quiet flag if in quiet mode / 如果在静默模式下添加静默标志
-QUIET_FLAG=""
-if [ "$QUIET_MODE" = true ]; then
-    QUIET_FLAG="--quiet"
-fi
+    # Get conda base path / 获取 conda 基础路径
+    CONDA_BASE_PREFIX=$(conda info --base 2>/dev/null)
 
-case $PKG_MANAGER in
-    "mamba")
-        CREATE_CMD="mamba env create $QUIET_FLAG"
-        UPDATE_CMD="mamba env update $QUIET_FLAG"
-        ;;
-    "micromamba")
-        CREATE_CMD="micromamba env create $QUIET_FLAG"
-        UPDATE_CMD="micromamba env update $QUIET_FLAG"
-        ;;
-    "conda-libmamba")
-        CREATE_CMD="conda env create --solver=libmamba $QUIET_FLAG"
-        UPDATE_CMD="conda env update --solver=libmamba $QUIET_FLAG"
-        ;;
-    *)
-        CREATE_CMD="conda env create $QUIET_FLAG"
-        UPDATE_CMD="conda env update $QUIET_FLAG"
-        if [ "$QUIET_MODE" = false ]; then
-            log_info ""
-            log_info "WARNING: Using default conda solver (slow)."
-            log_info "警告：使用默认 conda 求解器（较慢）。"
-            log_info "For faster installation, install mamba:"
-            log_info "为了更快安装，请安装 mamba："
-            log_info "  conda install -n base -c conda-forge mamba"
-            log_info ""
+    log_header "NOVA Nanobody Filter - Environment Setup / 纳米抗体过滤器 - 环境设置"
+
+    # Configure conda for better network reliability
+    # 配置 conda 以提高网络可靠性
+    log_info "Configuring conda for better network reliability..."
+    log_info "配置 conda 以提高网络可靠性..."
+    conda config --set remote_read_timeout_secs 600 2>/dev/null || true
+    conda config --set remote_connect_timeout_secs 30 2>/dev/null || true
+    conda config --set fetch_threads 2 2>/dev/null || true
+
+    # Detect package manager: prefer mamba > micromamba > conda with libmamba > conda
+    # 检测包管理器：优先使用 mamba > micromamba > 带 libmamba 的 conda > conda
+    detect_package_manager() {
+        if command -v mamba &> /dev/null; then
+            echo "mamba"
+        elif command -v micromamba &> /dev/null; then
+            echo "micromamba"
+        else
+            # Check if libmamba solver is available
+            # 检查 libmamba 求解器是否可用
+            if conda config --show solver 2>/dev/null | grep -q "libmamba"; then
+                echo "conda-libmamba"
+            elif conda list -n base 2>/dev/null | grep -q "conda-libmamba-solver"; then
+                echo "conda-libmamba"
+            else
+                echo "conda"
+            fi
         fi
-        ;;
-esac
+    }
 
-# Check if environment file exists / 检查环境文件是否存在
-if [ ! -f "$ENV_FILE" ]; then
-    log_error "Environment file not found: $ENV_FILE"
-    log_error "未找到环境文件: $ENV_FILE"
-    exit 1
+    PKG_MANAGER=$(detect_package_manager)
+
+    log_info ""
+    log_info "Using package manager: $PKG_MANAGER"
+    log_info "使用包管理器: $PKG_MANAGER"
+
+    # Set up the create/update commands based on package manager
+    # 根据包管理器设置创建/更新命令
+    # Add quiet flag if in quiet mode / 如果在静默模式下添加静默标志
+    QUIET_FLAG=""
+    if [ "$QUIET_MODE" = true ]; then
+        QUIET_FLAG="--quiet"
+    fi
+
+    case $PKG_MANAGER in
+        "mamba")
+            CREATE_CMD="mamba env create $QUIET_FLAG"
+            UPDATE_CMD="mamba env update $QUIET_FLAG"
+            ;;
+        "micromamba")
+            CREATE_CMD="micromamba env create $QUIET_FLAG"
+            UPDATE_CMD="micromamba env update $QUIET_FLAG"
+            ;;
+        "conda-libmamba")
+            CREATE_CMD="conda env create --solver=libmamba $QUIET_FLAG"
+            UPDATE_CMD="conda env update --solver=libmamba $QUIET_FLAG"
+            ;;
+        *)
+            CREATE_CMD="conda env create $QUIET_FLAG"
+            UPDATE_CMD="conda env update $QUIET_FLAG"
+            if [ "$QUIET_MODE" = false ]; then
+                log_info ""
+                log_info "WARNING: Using default conda solver (slow)."
+                log_info "警告：使用默认 conda 求解器（较慢）。"
+                log_info "For faster installation, install mamba:"
+                log_info "为了更快安装，请安装 mamba："
+                log_info "  conda install -n base -c conda-forge mamba"
+                log_info ""
+            fi
+            ;;
+    esac
+
+    # Check if environment file exists / 检查环境文件是否存在
+    if [ ! -f "$ENV_FILE" ]; then
+        log_error "Environment file not found: $ENV_FILE"
+        log_error "未找到环境文件: $ENV_FILE"
+        exit 1
+    fi
+
+    log_info "Environment file: $ENV_FILE"
+    log_info "环境文件: $ENV_FILE"
 fi
-
-log_info "Environment file: $ENV_FILE"
-log_info "环境文件: $ENV_FILE"
 
 # Function to run command with retries / 带重试的命令执行函数
 run_with_retry() {
@@ -260,66 +291,72 @@ run_with_retry() {
     return 1
 }
 
-# Check if environment already exists / 检查环境是否已存在
-if conda env list 2>/dev/null | grep -q "^$ENV_NAME "; then
-    log_info ""
-    log_info "Environment '$ENV_NAME' already exists."
-    log_info "环境 '$ENV_NAME' 已存在。"
-    
-    # Handle yes mode / 处理自动确认模式
-    if [ "$YES_MODE" = true ]; then
-        REPLY="y"
+if [ "$USE_VAST" = false ]; then
+    # Check if environment already exists / 检查环境是否已存在
+    if conda env list 2>/dev/null | grep -q "^$ENV_NAME "; then
+        log_info ""
+        log_info "Environment '$ENV_NAME' already exists."
+        log_info "环境 '$ENV_NAME' 已存在。"
+        
+        # Handle yes mode / 处理自动确认模式
+        if [ "$YES_MODE" = true ]; then
+            REPLY="y"
+        else
+            log_info ""
+            read -p "Do you want to update it? (y/N) / 是否要更新？(y/N) " -n 1 -r
+            echo ""
+        fi
+        
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            log_info ""
+            log_info "Updating environment..."
+            log_info "更新环境..."
+            run_with_retry "$UPDATE_CMD -n $ENV_NAME -f \"$ENV_FILE\" --prune"
+        else
+            log_info "Skipping environment creation."
+            log_info "跳过环境创建。"
+        fi
     else
         log_info ""
-        read -p "Do you want to update it? (y/N) / 是否要更新？(y/N) " -n 1 -r
-        echo ""
-    fi
-    
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        log_info "Creating conda environment..."
+        log_info "创建 conda 环境..."
+        log_info "This may take a while... / 这可能需要一些时间..."
         log_info ""
-        log_info "Updating environment..."
-        log_info "更新环境..."
-        run_with_retry "$UPDATE_CMD -n $ENV_NAME -f \"$ENV_FILE\" --prune"
-    else
-        log_info "Skipping environment creation."
-        log_info "跳过环境创建。"
+        run_with_retry "$CREATE_CMD -f \"$ENV_FILE\""
     fi
+
+    # Get conda prefix for the environment / 获取环境的 conda 前缀
+    export CONDA_PREFIX=$(conda info --envs 2>/dev/null | grep "^$ENV_NAME " | awk '{print $NF}')
+
+    if [ -z "$CONDA_PREFIX" ]; then
+        log_error "Failed to get CONDA_PREFIX for environment '$ENV_NAME'"
+        log_error "无法获取环境 '$ENV_NAME' 的 CONDA_PREFIX"
+        exit 1
+    fi
+
+    # =============================================================================
+    # Activate the environment for pip/uv installation
+    # 激活环境以进行 pip/uv 安装
+    # =============================================================================
+    log_info "Activating conda environment '$ENV_NAME'..."
+    log_info "激活 conda 环境 '$ENV_NAME'..."
+
+    # Source conda.sh to enable conda activate in scripts
+    # 加载 conda.sh 以在脚本中启用 conda activate
+    if [ -f "$CONDA_BASE_PREFIX/etc/profile.d/conda.sh" ]; then
+        source "$CONDA_BASE_PREFIX/etc/profile.d/conda.sh"
+    fi
+
+    # Activate the target environment / 激活目标环境
+    conda activate "$ENV_NAME"
+
+    log_success "Environment '$ENV_NAME' activated"
+    log_success "环境 '$ENV_NAME' 已激活"
 else
-    log_info ""
-    log_info "Creating conda environment..."
-    log_info "创建 conda 环境..."
-    log_info "This may take a while... / 这可能需要一些时间..."
-    log_info ""
-    run_with_retry "$CREATE_CMD -f \"$ENV_FILE\""
+    export CONDA_PREFIX="$ENV_PREFIX"
+    log_success "Vast.ai template environment ready"
+    log_success "Vast.ai 模板环境已就绪"
 fi
-
-# Get conda prefix for the environment / 获取环境的 conda 前缀
-export CONDA_PREFIX=$(conda info --envs 2>/dev/null | grep "^$ENV_NAME " | awk '{print $NF}')
-
-if [ -z "$CONDA_PREFIX" ]; then
-    log_error "Failed to get CONDA_PREFIX for environment '$ENV_NAME'"
-    log_error "无法获取环境 '$ENV_NAME' 的 CONDA_PREFIX"
-    exit 1
-fi
-
-# =============================================================================
-# Activate the environment for pip/uv installation
-# 激活环境以进行 pip/uv 安装
-# =============================================================================
-log_info "Activating conda environment '$ENV_NAME'..."
-log_info "激活 conda 环境 '$ENV_NAME'..."
-
-# Source conda.sh to enable conda activate in scripts
-# 加载 conda.sh 以在脚本中启用 conda activate
-if [ -f "$CONDA_BASE_PREFIX/etc/profile.d/conda.sh" ]; then
-    source "$CONDA_BASE_PREFIX/etc/profile.d/conda.sh"
-fi
-
-# Activate the target environment / 激活目标环境
-conda activate "$ENV_NAME"
-
-log_success "Environment '$ENV_NAME' activated"
-log_success "环境 '$ENV_NAME' 已激活"
 
 # =============================================================================
 # Install pip packages using uv (10-100x faster than pip)
@@ -328,7 +365,9 @@ log_success "环境 '$ENV_NAME' 已激活"
 log_header "Installing pip packages with uv / 使用 uv 安装 pip 包"
 
 # Select requirements file based on environment type / 根据环境类型选择需求文件
-if [ "$USE_MINIMAL" = true ]; then
+if [ "$USE_VAST" = true ]; then
+    PIP_REQUIREMENTS="$SCRIPT_DIR/requirements-minimal.txt"
+elif [ "$USE_MINIMAL" = true ]; then
     PIP_REQUIREMENTS="$SCRIPT_DIR/requirements-minimal.txt"
 else
     PIP_REQUIREMENTS="$SCRIPT_DIR/requirements.txt"
@@ -384,6 +423,22 @@ if [ -f "$PIP_REQUIREMENTS" ]; then
 else
     log_info "No $(basename $PIP_REQUIREMENTS) found, skipping..."
     log_info "未找到 $(basename $PIP_REQUIREMENTS)，跳过..."
+fi
+
+if [ "$USE_VAST" = true ]; then
+    log_header "Vast.ai template installation complete / Vast.ai 模板安装完成"
+    if [ "$QUIET_MODE" = false ]; then
+        echo "To activate the environment, run:"
+        echo "要激活环境，请运行："
+        echo ""
+        echo "  source /venv/main/bin/activate"
+        echo ""
+        echo "Installed in Vast.ai template mode / Vast.ai 模板模式已安装："
+        echo "  - TNP and project Python dependencies"
+        echo "  - No local conda env creation"
+        echo "  - No IgBLAST/DSSP bootstrap"
+    fi
+    exit 0
 fi
 
 # =============================================================================
