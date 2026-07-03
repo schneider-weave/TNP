@@ -1,0 +1,18 @@
+# =============================================================================
+# NOVA Nanobody Filter - Vast.ai TNP-only Pip Requirements
+# 纳米抗体过滤器 - Vast.ai TNP 仅需 Pip 依赖
+#
+# Use this on Vast.ai PyTorch templates when you only need the TXT -> TNP
+# filtering flow. It intentionally excludes NOVA-specific extras such as
+# bittensor, openmm, promb, and ImmuneBuilder to avoid template conflicts.
+# 在 Vast.ai PyTorch 模板上仅运行 TXT -> TNP 过滤流程时使用。
+# 该文件故意排除 bittensor、openmm、promb、ImmuneBuilder 等 NOVA 额外依赖，
+# 以避免与模板发生冲突。
+# =============================================================================
+
+wheel
+biopython==1.86
+pydantic>=2.0.0
+
+# TNP: Therapeutic Nanobody Profiler / 治疗性纳米抗体分析器
+git+https://github.com/oxpig/TNP.git@29dcac72f1380e8538e8870f45a699d3c6156162

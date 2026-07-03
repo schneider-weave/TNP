@@ -373,7 +373,7 @@ log_header "Installing pip packages with uv / 使用 uv 安装 pip 包"
 
 # Select requirements file based on environment type / 根据环境类型选择需求文件
 if [ "$USE_VAST" = true ]; then
-    PIP_REQUIREMENTS="$SCRIPT_DIR/requirements-minimal.txt"
+    PIP_REQUIREMENTS="$SCRIPT_DIR/requirements-vast.txt"
 elif [ "$USE_MINIMAL" = true ]; then
     PIP_REQUIREMENTS="$SCRIPT_DIR/requirements-minimal.txt"
 else
