@@ -356,6 +356,13 @@ else
     export CONDA_PREFIX="$ENV_PREFIX"
     log_success "Vast.ai template environment ready"
     log_success "Vast.ai 模板环境已就绪"
+    log_info "Removing Vast.ai package conflict: scalecodec / cyscale"
+    log_info "移除 Vast.ai 包冲突：scalecodec / cyscale"
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -m pip uninstall -y scalecodec cyscale >/dev/null 2>&1 || true
+    elif command -v python >/dev/null 2>&1; then
+        python -m pip uninstall -y scalecodec cyscale >/dev/null 2>&1 || true
+    fi
 fi
 
 # =============================================================================
