@@ -137,22 +137,32 @@ done
 
 if [ "$USE_VAST" = true ]; then
     log_header "NOVA Nanobody Filter - Vast.ai template setup / NOVA 纳米抗体过滤器 - Vast.ai 模板设置"
-    VAST_ACTIVATE="/venv/main/bin/activate"
-    if [ ! -f "$VAST_ACTIVATE" ]; then
-        log_error "Vast.ai template environment not found: $VAST_ACTIVATE"
-        log_error "未找到 Vast.ai 模板环境: $VAST_ACTIVATE"
+    VAST_PYTHON="$(command -v python3 || command -v python || true)"
+    if [ -z "$VAST_PYTHON" ]; then
+        log_error "No Python executable found on Vast.ai template"
+        log_error "在 Vast.ai 模板上未找到 Python 可执行文件"
         exit 1
     fi
 
-    # Reuse the template's pre-configured main environment.
-    # 复用模板自带的 main 环境。
-    source "$VAST_ACTIVATE"
-    CONDA_BASE_PREFIX=$(conda info --base 2>/dev/null || true)
-    ENV_PREFIX="${CONDA_PREFIX:-${VIRTUAL_ENV:-/venv/main}}"
+    # Create a project-local isolated venv to avoid Vast.ai template package conflicts.
+    # 创建项目本地隔离虚拟环境，避免 Vast.ai 模板包冲突。
+    VAST_VENV="$SCRIPT_DIR/.venv_tnp"
+    if [ ! -d "$VAST_VENV" ]; then
+        log_info "Creating isolated Vast.ai venv at $VAST_VENV"
+        log_info "在 $VAST_VENV 创建隔离 Vast.ai 虚拟环境"
+        "$VAST_PYTHON" -m venv "$VAST_VENV"
+    fi
 
-    log_info "Using Vast.ai template environment: $ENV_PREFIX"
-    log_info "使用 Vast.ai 模板环境: $ENV_PREFIX"
-    PIP_REQUIREMENTS="$SCRIPT_DIR/requirements-minimal.txt"
+    # Activate the isolated venv.
+    # 激活隔离虚拟环境。
+    # shellcheck disable=SC1090
+    source "$VAST_VENV/bin/activate"
+    CONDA_BASE_PREFIX=""
+    ENV_PREFIX="$VAST_VENV"
+
+    log_info "Using isolated Vast.ai venv: $ENV_PREFIX"
+    log_info "使用隔离的 Vast.ai 虚拟环境: $ENV_PREFIX"
+    PIP_REQUIREMENTS="$SCRIPT_DIR/requirements-vast.txt"
 else
     # Select environment file / 选择环境文件
     if [ "$USE_MINIMAL" = true ]; then
@@ -438,11 +448,11 @@ if [ "$USE_VAST" = true ]; then
         echo "To activate the environment, run:"
         echo "要激活环境，请运行："
         echo ""
-        echo "  source /venv/main/bin/activate"
+        echo "  source $SCRIPT_DIR/.venv_tnp/bin/activate"
         echo ""
-        echo "Installed in Vast.ai template mode / Vast.ai 模板模式已安装："
+        echo "Installed in isolated Vast.ai mode / 已安装在隔离的 Vast.ai 模式："
         echo "  - TNP and project Python dependencies"
-        echo "  - No local conda env creation"
+        echo "  - No shared template venv usage"
         echo "  - No IgBLAST/DSSP bootstrap"
     fi
     exit 0
